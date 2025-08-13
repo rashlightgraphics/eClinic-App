@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eClinic</title>
+    <!-- Tailwind CSS CDN for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#1A535C',
+                        secondary: '#4ECDC4',
+                        accent: '#FFE66D',
+                        background: '#EAEAEA',
+                        text: '#222222'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Safety stubs: prevent ReferenceError from inline onclicks firing before module initializes -->
+    <script>
+        (function(){
+            const stub = (name)=>{ if(!window[name]) window[name] = function(){ console.warn(name+' called before app initialization', arguments); }; };
+            ['showPage','handleLogout','cancelAppointment','openChatWithAppointment','showCustomMessage'].forEach(stub);
+        })();
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #EAEAEA; color: #222222; }
+        .page { display: none; }
+        .active-page { display: flex; }
+        .chat-messages::-webkit-scrollbar { width: 8px; }
+        .chat-messages::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        .chat-messages::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        .chat-messages::-webkit-scrollbar-thumb:hover { background: #555; }
+
+        /* Custom styles for ultra modern form */
+        .modern-input-group {
+            position: relative;
+            margin-top: 1.5rem;
+        }
+
+        .modern-input {
+            width: 100%;
+            padding: 1rem 0.75rem;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease-in-out;
+            font-size: 1rem;
+        }
+
+        .modern-input:focus {
+            outline: none;
+            border-color: #1A535C;
+            box-shadow: 0 0 0 3px rgba(26, 83, 92, 0.2);
+        }
+
+        .modern-label {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6b7280;
+            transition: all 0.2s ease-in-out;
+            pointer-events: none;
+            font-size: 1rem;
+        }
+
+        .modern-input:focus + .modern-label,
+        .modern-input:not(:placeholder-shown) + .modern-label {
+            top: 0;
+            font-size: 0.75rem;
+            padding: 0 0.25rem;
+            background: white;
+            color: #1A535C;
+            transform: translateY(-50%);
+        }
+
+        /* Adjustments for select elements */
+        .modern-select {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" stroke="%236B7280"><path d="M7 7l3 3 3-3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1.5em 1.5em;
+        }
+        
+        .chat-list-item.active {
+            background-color: #e0f2f1; /* Light teal for active chat */
+            border-left: 4px solid #4ECDC4;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+
+    <main class="w-full max-w-md h-screen bg-white shadow-xl rounded-2xl flex flex-col overflow-hidden">
+        <div id="app-container" class="flex-1 flex flex-col overflow-auto">
+            <!-- Splash Screen - Replaces the loading spinner -->
+            <div id="splash-screen" class="page active-page flex-1 items-center justify-center p-4">
+                <h1 class="text-6xl font-bold text-primary">eClinic</h1>
+            </div>
+
+            <div id="error-message" class="page flex-1 items-center justify-center p-4 text-red-500 font-medium text-center hidden">
+                <p>An error occurred. Please refresh the page.</p>
+            </div>
+            
+            <!-- Custom Message Modal -->
+            <div id="custom-message-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+                <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                    <div class="mt-3 text-center">
+                        <div id="custom-message-icon" class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100">
+                            <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                        </div>
+                        <h3 class="text-lg leading-6 font-medium text-gray-900 mt-2" id="custom-message-title">Success!</h3>
+                        <div class="mt-2 px-7 py-3">
+                            <p class="text-sm text-gray-500" id="custom-message-text">Your action was successful.</p>
+                        </div>
+                        <div class="items-center px-4 py-3">
+                            <button id="close-custom-message" class="px-4 py-2 bg-primary text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary">
+                                OK
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Login -->
+            <div id="login-page" class="page flex-col p-8 items-center justify-center">
+                <h1 class="text-3xl font-bold text-center mb-6 text-primary">eClinic Login</h1>
+                <p class="text-center text-sm text-gray-500 mb-8">Sign in or create an account to manage your health.</p>
+                <form id="login-form" class="w-full space-y-4">
+                    <div class="modern-input-group">
+                        <input type="email" id="login-email" name="login-email" placeholder=" " class="modern-input" required>
+                        <label for="login-email" class="modern-label">Email</label>
+                    </div>
+                    <div class="modern-input-group">
+                        <input type="password" id="login-password" name="login-password" placeholder=" " class="modern-input" required>
+                        <label for="login-password" class="modern-label">Password</label>
+                    </div>
+                    <button type="submit" class="w-full bg-primary text-white font-bold p-3 rounded-lg hover:bg-opacity-90 transition-colors">Sign In</button>
+                    <button type="button" id="toggle-signup" class="w-full text-primary font-semibold p-3 rounded-lg border-2 border-primary hover:bg-primary hover:text-white transition-colors">Create Account</button>
+                    <p id="login-error" class="text-red-500 text-center font-medium mt-2"></p>
+                </form>
+                <div class="w-full border-t border-gray-300 mt-6 pt-6 flex flex-col items-center">
+                    <button type="button" id="google-login-btn" class="w-full bg-blue-500 text-white font-bold p-3 rounded-lg hover:bg-opacity-90 transition-colors flex items-center justify-center space-x-2">
+                        <i class="fab fa-google"></i>
+                        <span>Sign in with Google</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Signup -->
+            <div id="signup-page" class="page flex-col p-8 items-center justify-center">
+                <h1 class="text-3xl font-bold text-center mb-6 text-primary">Create an Account</h1>
+                <p class="text-center text-sm text-gray-500 mb-8">Join eClinic and take control of your health.</p>
+                <form id="signup-form" class="w-full space-y-4">
+                    <div class="modern-input-group">
+                        <input type="text" id="signup-fullname" name="signup-fullname" placeholder=" " class="modern-input" required>
+                        <label for="signup-fullname" class="modern-label">Full name</label>
+                    </div>
+                    <div class="modern-input-group">
+                        <input type="email" id="signup-email" name="signup-email" placeholder=" " class="modern-input" required>
+                        <label for="signup-email" class="modern-label">Email</label>
+                    </div>
+                    <div class="modern-input-group">
+                        <input type="password" id="signup-password" name="signup-password" placeholder=" " class="modern-input" required minlength="6">
+                        <label for="signup-password" class="modern-label">Password (min 6 chars)</label>
+                    </div>
+                    <button type="submit" class="w-full bg-primary text-white font-bold p-3 rounded-lg hover:bg-opacity-90 transition-colors">Sign Up</button>
+                    <button type="button" id="toggle-login" class="w-full text-primary font-semibold p-3 rounded-lg border-2 border-primary hover:bg-primary hover:text-white transition-colors">Back to Sign In</button>
+                </form>
+                <div class="w-full border-t border-gray-300 mt-6 pt-6 flex flex-col items-center">
+                    <button type="button" id="google-signup-btn" class="w-full bg-blue-500 text-white font-bold p-3 rounded-lg hover:bg-opacity-90 transition-colors flex items-center justify-center space-x-2">
+                        <i class="fab fa-google"></i>
+                        <span>Sign up with Google</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Home -->
+            <div id="home-page" class="page flex-col flex-1 p-6">
+                <div class="flex-1 overflow-y-auto pb-4">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h1 class="text-2xl font-bold text-primary">Hello, <span id="home-display-name">Welcome</span></h1>
+                            <p class="text-xs text-gray-500">Ready to take care of your health today?</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl shadow-md mb-6">
+                        <h2 class="text-2xl font-bold mb-4 text-primary">Book an Appointment</h2>
+                        <p class="text-gray-600 mb-4">Schedule a consultation with a specialist.</p>
+                        <button data-showpage="appointment-page" class="btn-show-page w-full bg-secondary text-white font-bold p-4 rounded-xl hover:bg-opacity-90 transition-colors shadow-md">Schedule Now</button>
+                    </div>
+                    <!-- NEW: Re-added the chat button, but it will now show a custom message, guiding the user to book an appointment first. -->
+                    <div class="bg-white p-6 rounded-2xl shadow-md">
+                        <h2 class="text-2xl font-bold mb-4 text-primary">Chat with a Doctor</h2>
+                        <p class="text-gray-600 mb-4">Speak directly with a healthcare professional via our secure chat.</p>
+                        <button id="home-chat-btn" class="w-full bg-accent text-primary font-bold p-4 rounded-xl hover:bg-opacity-90 transition-colors shadow-md">Start a Chat</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile -->
+            <div id="profile-page" class="page flex-col p-6 flex-1">
+                <h1 class="text-3xl font-bold mb-6 text-primary text-center"><span id="profile-heading-name">Your</span> Profile</h1>
+                <div class="flex-1 overflow-y-auto">
+                    <div class="bg-white p-6 rounded-2xl shadow-md mb-6">
+                        <div>
+                            <p class="text-lg font-bold" id="profile-name">Welcome</p>
+                            <p class="text-sm text-gray-600" id="profile-email">email@example.com</p>
+                            <p class="text-xs text-gray-500 mt-1">User ID: <span id="profile-user-id" class="font-mono"></span></p>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white p-6 rounded-2xl shadow-md mb-6">
+                        <h2 class="text-2xl font-bold mb-4 text-primary">Your Appointments</h2>
+                        <div id="profile-appointments-list" class="space-y-4">
+                            <!-- Appointments will be dynamically loaded here -->
+                        </div>
+                    </div>
+
+                    <button id="logout-btn" class="w-full bg-red-500 text-white font-bold p-4 rounded-xl hover:bg-red-600 transition-colors shadow-md">Logout</button>
+                </div>
+            </div>
+
+            <!-- Appointment Form -->
+            <div id="appointment-page" class="page flex-col p-6 flex-1">
+                <h1 class="text-3xl font-bold mb-6 text-primary text-center">Book Appointment</h1>
+                <form id="appointment-form" class="flex-1 flex flex-col">
+                    <div class="flex-1 overflow-y-auto space-y-6">
+                        <div class="bg-white p-6 rounded-3xl shadow-lg">
+                            <h2 class="text-2xl font-bold mb-4 text-primary">Patient Details</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div class="modern-input-group">
+                                    <input type="text" id="patient-fullname" name="patient-fullname" placeholder=" " class="modern-input" required>
+                                    <label for="patient-fullname" class="modern-label">Full Name</label>
+                                </div>
+                                <div class="modern-input-group">
+                                    <input type="tel" id="patient-phone" name="patient-phone" placeholder=" " class="modern-input" required>
+                                    <label for="patient-phone" class="modern-label">Phone Number</label>
+                                </div>
+                            </div>
+                            <div class="modern-input-group mt-6">
+                                <input type="email" id="patient-email" name="patient-email" placeholder=" " class="modern-input" required readonly>
+                                <label for="patient-email" class="modern-label">Email Address</label>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                                <div class="modern-input-group">
+                                    <input type="date" id="patient-dob" name="patient-dob" placeholder=" " class="modern-input" required>
+                                    <label for="patient-dob" class="modern-label">Date of Birth</label>
+                                </div>
+                                <div class="modern-input-group">
+                                    <select id="patient-gender" name="patient-gender" class="modern-input modern-select">
+                                        <option value="">Select Gender</option>
+                                        <option value="male">Male</p>
+                                        <option value="female">Female</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                    <label for="patient-gender" class="modern-label">Gender</label>
+                                </div>
+                            </div>
+                            <div class="modern-input-group mt-6">
+                                <input type="text" id="patient-address" name="patient-address" placeholder=" " class="modern-input">
+                                <label for="patient-address" class="modern-label">Address</label>
+                            </div>
+                        </div>
+
+                        <div class="bg-white p-6 rounded-3xl shadow-lg">
+                            <h2 class="text-2xl font-bold mb-4 text-primary">Appointment Details</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div class="modern-input-group">
+                                    <select id="appointment-mode" name="appointment-mode" class="modern-input modern-select" required>
+                                        <option value="video">Video Call</option>
+                                        <option value="audio">Audio Call</option>
+                                        <option value="chat">Chat Only</option>
+                                    </select>
+                                    <label for="appointment-mode" class="modern-label">Mode of Appointment</label>
+                                </div>
+                                <div class="modern-input-group">
+                                    <select id="appointment-urgency" name="appointment-urgency" class="modern-input modern-select" required>
+                                        <option value="routine">Routine</option>
+                                        <option value="urgent">Urgent</option>
+                                    </select>
+                                    <label for="appointment-urgency" class="modern-label">Urgency Level</label>
+                                </div>
+                            </div>
+                            <div class="modern-input-group mt-6">
+                                <select id="appointment-specialization" name="appointment-specialization" class="modern-input modern-select" required>
+                                    <option value="">Select Specialization</option>
+                                    <option value="general">General Practice</option>
+                                    <option value="cardiology">Cardiology</option>
+                                    <option value="dermatology">Dermatology</option>
+                                    <option value="pediatrics">Pediatrics</option>
+                                    <option value="orthopedics">Orthopedics</option>
+                                    <option value="gynecology">Gynecology</option>
+                                </select>
+                                <label for="appointment-specialization" class="modern-label">Specialization</label>
+                            </div>
+                            <div class="modern-input-group mt-6">
+                                <textarea id="appointment-reason" name="appointment-reason" rows="4" placeholder=" " class="modern-input"></textarea>
+                                <label for="appointment-reason" class="modern-label">Reason for visit</label>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                                <div class="modern-input-group">
+                                    <input type="date" id="appointment-date" name="appointment-date" placeholder=" " class="modern-input" required>
+                                    <label for="appointment-date" class="modern-label">Date</label>
+                                </div>
+                                <div class="modern-input-group">
+                                    <input type="time" id="appointment-time" name="appointment-time" placeholder=" " class="modern-input" required>
+                                    <label for="appointment-time" class="modern-label">Time</label>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                    <button type="submit" class="w-full bg-primary text-white font-bold p-4 rounded-xl mt-4 hover:bg-opacity-90 transition-colors shadow-md">Confirm Booking</button>
+                </form>
+            </div>
+
+            <!-- Doctor Page - Updated UI -->
+            <div id="doctor-page" class="page flex-col flex-1 p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h1 class="text-3xl font-bold text-primary text-center flex-1">Doctor Chat</h1>
+                    <button id="logout-btn-doctor" class="bg-red-500 text-white font-bold p-2 rounded-lg hover:bg-red-600 transition-colors shadow-md">Logout</button>
+                </div>
+                
+                <p class="text-sm text-gray-500 text-center mb-6">Welcome, Dr. <span id="doctor-display-name"></span></p>
+
+                <!-- NEW: Split view for doctor's page -->
+                <div class="flex flex-1 overflow-hidden rounded-2xl shadow-md bg-white">
+                    <!-- Patient Chat List -->
+                    <div id="patient-list" class="w-1/3 bg-gray-100 p-4 border-r border-gray-200 overflow-y-auto">
+                        <h2 class="text-lg font-bold text-primary mb-4">Active Chats</h2>
+                        <!-- Patient list will be dynamically added here -->
+                        <div id="doctor-patient-list" class="space-y-2">
+                            <p class="text-gray-500 text-center text-sm">No active chats.</p>
+                        </div>
+                    </div>
+
+                    <!-- Chat View Area -->
+                    <div id="doctor-chat-view" class="flex-col flex-1 p-4">
+                        <h2 class="text-xl font-bold text-primary text-center mb-4">Chat with <span id="current-patient-name">Patient</span></h2>
+                        <div id="doctor-chat-messages" class="chat-messages flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 rounded-2xl shadow-inner mb-4 flex flex-col">
+                            <!-- Chat messages will be dynamically added here -->
+                            <p class="text-gray-500 text-center">Select a patient to start a chat.</p>
+                        </div>
+                        <form id="doctor-chat-form" class="flex hidden">
+                            <input type="text" id="doctor-chat-input" placeholder="Type your reply..." class="flex-1 p-3 rounded-l-xl border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-secondary">
+                            <button type="submit" class="bg-secondary text-white font-bold p-3 rounded-r-xl hover:bg-opacity-90 transition-colors shadow-md">Send</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat (Patient view) -->
+            <div id="chat-page" class="page flex-col flex-1 p-6">
+                <h1 class="text-3xl font-bold mb-4 text-primary text-center">Doctor Chat</h1>
+                <p class="text-sm text-gray-500 text-center mb-6">Your conversation is private and secure.</p>
+                <div id="chat-messages" class="chat-messages flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50 rounded-2xl shadow-inner mb-4 flex flex-col"></div>
+                <form id="chat-form" class="flex">
+                    <input type="text" id="chat-input" placeholder="Type your message... (include appointment ID if relevant)" class="flex-1 p-3 rounded-l-xl border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-secondary">
+                    <button type="submit" class="bg-secondary text-white font-bold p-3 rounded-r-xl hover:bg-opacity-90 transition-colors shadow-md">Send</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Nav -->
+        <nav id="nav-bar" class="w-full bg-white shadow-2xl p-4 flex justify-around items-center border-t border-gray-200 hidden">
+            <button data-showpage="home-page" class="btn-show-page text-primary hover:text-secondary transition-colors flex flex-col items-center">
+                <i class="fa-solid fa-house"></i>
+                <span class="text-xs mt-1">Home</span>
+            </button>
+            <button data-showpage="appointment-page" class="btn-show-page text-gray-400 hover:text-secondary transition-colors flex flex-col items-center">
+                <i class="fa-solid fa-calendar-check"></i>
+                <span class="text-xs mt-1">Book</span>
+            </button>
+            <!-- RE-ADDED a chat button, but it will show a custom message. -->
+            <button id="nav-chat-btn" class="text-gray-400 hover:text-secondary transition-colors flex flex-col items-center">
+                <i class="fa-solid fa-comment-dots"></i>
+                <span class="text-xs mt-1">Chat</span>
+            </button>
+            <button data-showpage="profile-page" class="btn-show-page text-gray-400 hover:text-secondary transition-colors flex flex-col items-center">
+                <i class="fa-solid fa-user"></i>
+                <span class="text-xs mt-1">Profile</span>
+            </button>
+        </nav>
+    </main>
+
+    <!-- Firebase SDK Imports -->
+    
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updateProfile, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, updateDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAQdzpvDxd5RgWeU6EX8rrh2B2aeuXlITI",
+  authDomain: "eclinic-da1c0.firebaseapp.com",
+  projectId: "eclinic-da1c0",
+  storageBucket: "eclinic-da1c0.firebasestorage.app",
+  messagingSenderId: "857766097478",
+  appId: "1:857766097478:web:5c2ee9e07c1877831d9047"
+};
+
+let app, db, auth, currentUser, currentChatPatientId;
+let currentChatAppointmentId = null; // NEW: Global variable for the patient's current chat.
+
+app = initializeApp(firebaseConfig);
+auth = getAuth(app);
+db = getFirestore(app);
+
+// NOTE: Hardcoded for demonstration. Replace with your actual doctor UIDs.
+const doctorUids = ['qp6X8xSdVJSNO08tSWDP1xRzPpM2'];
+let isDoctor = false;
+
+// Helpers
+const appointmentsCollection = (userId) => collection(db, `users/${userId}/appointments`);
+const chatRoomMessages = (appointmentId) => collection(db, `chats/${appointmentId}/messages`);
+const chatsCollection = collection(db, 'chats');
+
+const pages = [...document.querySelectorAll('.page')];
+const navBar = document.getElementById('nav-bar');
+const customMessageModal = document.getElementById('custom-message-modal');
+
+// --- PAGE & UI FUNCTIONS ---
+
+function showPage(pageId) {
+    pages.forEach(page => page.classList.remove('active-page'));
+    const el = document.getElementById(pageId);
+    if (el) el.classList.add('active-page');
+    if (pageId === 'profile-page' && currentUser && !isDoctor) setupPatientAppointmentsListener();
+    if (pageId === 'doctor-page' && isDoctor) {
+        // Automatically start the doctor chat view for the first patient
+        setupDoctorChat();
+    }
+}
+
+function showCustomMessage(title, message, isSuccess = true, callback = null) {
+    document.getElementById('custom-message-title').textContent = title;
+    document.getElementById('custom-message-text').textContent = message;
+    const iconDiv = document.getElementById('custom-message-icon');
+    iconDiv.innerHTML = '';
+    if (isSuccess) {
+        iconDiv.classList.remove('bg-red-100');
+        iconDiv.classList.add('bg-green-100');
+        iconDiv.innerHTML = `<svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
+    } else {
+        iconDiv.classList.remove('bg-green-100');
+        iconDiv.classList.add('bg-red-100');
+        iconDiv.innerHTML = `<svg class="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+    }
+    customMessageModal.classList.remove('hidden');
+    const closeBtn = document.getElementById('close-custom-message');
+    closeBtn.onclick = () => {
+        customMessageModal.classList.add('hidden');
+        if (callback) callback();
+    };
+}
+
+document.getElementById('close-custom-message').addEventListener('click', () => {
+    customMessageModal.classList.add('hidden');
+});
+
+function attachShowPageButtons() {
+    document.querySelectorAll('.btn-show-page').forEach(btn => {
+        btn.addEventListener('click', e => {
+            const page = e.currentTarget.dataset.showpage;
+            if (page) showPage(page);
+        });
+    });
+}
+
+// --- AUTHENTICATION LISTENERS ---
+
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        currentUser = user;
+        isDoctor = doctorUids.includes(user.uid);
+        if (isDoctor) {
+            navBar.classList.add('hidden');
+            document.getElementById('doctor-display-name').textContent = user.displayName || 'Doctor';
+            showPage('doctor-page');
+        } else {
+            navBar.classList.remove('hidden');
+            document.getElementById('home-display-name').textContent = user.displayName || 'Patient';
+            document.getElementById('profile-name').textContent = user.displayName || 'Patient';
+            document.getElementById('profile-user-id').textContent = user.uid;
+            document.getElementById('profile-email').textContent = user.email || '';
+            document.getElementById('patient-email').value = user.email || '';
+            showPage('home-page');
+        }
+        attachShowPageButtons();
+    } else {
+        currentUser = null;
+        isDoctor = false;
+        navBar.classList.add('hidden');
+        showPage('login-page');
+    }
+});
+
+// Signup
+document.getElementById('signup-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        const name = e.target['signup-fullname'].value.trim();
+        const email = e.target['signup-email'].value.trim();
+        const password = e.target['signup-password'].value;
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(cred.user, { displayName: name });
+    } catch (error) {
+        showCustomMessage('Signup Failed', error.message, false);
+    }
+});
+
+// Login
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        await signInWithEmailAndPassword(auth, e.target['login-email'].value.trim(), e.target['login-password'].value);
+    } catch (error) {
+        showCustomMessage('Login Failed', error.message, false);
+    }
+});
+
+// Logout
+document.getElementById('logout-btn').addEventListener('click', () => signOut(auth));
+document.getElementById('logout-btn-doctor').addEventListener('click', () => signOut(auth));
+
+// New logic for Home Page and Nav Bar chat buttons
+document.getElementById('home-chat-btn').addEventListener('click', () => {
+    showCustomMessage(
+        'Start a Chat',
+        'Please book an appointment first to start a chat with a doctor. You can do this from the "Book Appointment" section.',
+        false
+    );
+});
+
+document.getElementById('nav-chat-btn').addEventListener('click', () => {
+    showCustomMessage(
+        'Start a Chat',
+        'Please book an appointment first. Then, you can access the chat from the "Your Appointments" list on your Profile page.',
+        false
+    );
+});
+
+
+// --- APPOINTMENT & CHAT LOGIC ---
+
+// Book Appointment - Save to patient subcollection and create chat
+document.getElementById('appointment-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const form = e.target;
+    
+    // Create a single unique document reference for the new appointment
+    const newAppointmentRef = doc(appointmentsCollection(currentUser.uid));
+
+    const data = {
+        patientName: form['patient-fullname'].value,
+        patientPhone: form['patient-phone'].value,
+        patientEmail: form['patient-email'].value,
+        patientDob: form['patient-dob']?.value || '',
+        patientGender: form['patient-gender']?.value || '',
+        patientAddress: form['patient-address']?.value || '',
+        specialization: form['appointment-specialization'].value,
+        reason: form['appointment-reason'].value,
+        date: form['appointment-date'].value,
+        time: form['appointment-time'].value,
+        mode: form['appointment-mode']?.value || '',
+        urgency: form['appointment-urgency']?.value || '',
+        status: 'Pending',
+        createdAt: serverTimestamp(),
+        userId: currentUser.uid,
+        appointmentId: newAppointmentRef.id
+    };
+
+    try {
+        await setDoc(newAppointmentRef, data);
+        await setDoc(doc(db, 'chats', newAppointmentRef.id), { 
+            appointmentId: newAppointmentRef.id, 
+            patientId: currentUser.uid, 
+            patientName: form['patient-fullname'].value,
+            status: 'active',
+            createdAt: serverTimestamp() 
+        });
+        
+        // Show success message and offer to start chat
+        showCustomMessage('Booking Successful!', 'Your appointment has been successfully booked. Would you like to start a chat with the doctor?', true, () => {
+            openChatWithAppointment(newAppointmentRef.id);
+        });
+        
+        form.reset();
+        showPage('profile-page');
+    } catch (error) {
+        showCustomMessage('Booking Failed', error.message, false);
+    }
+});
+
+// Patient Appointments Listener for Profile Page
+function setupPatientAppointmentsListener() {
+    if (!currentUser) return;
+    const q = query(appointmentsCollection(currentUser.uid), orderBy('createdAt', 'desc'));
+    onSnapshot(q, (snap) => {
+        const list = document.getElementById('profile-appointments-list');
+        list.innerHTML = '';
+        const activeAppointments = snap.docs.filter(docSnap => docSnap.data().status !== 'Cancelled' && docSnap.data().status !== 'Ended');
+        if (activeAppointments.length === 0) {
+            list.innerHTML = '<p class="text-gray-500">You have no upcoming appointments.</p>';
+        }
+        activeAppointments.forEach(docSnap => {
+            const a = docSnap.data();
+            const item = document.createElement('div');
+            item.className = 'bg-gray-100 p-4 rounded-xl shadow-inner';
+            item.innerHTML = `
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="font-bold text-primary">${a.specialization} - ${a.date} at ${a.time}</p>
+                        <p class="text-sm text-gray-600">Reason: ${a.reason}</p>
+                        <p class="text-xs text-gray-500 mt-1">Status: <span class="font-semibold text-accent">${a.status}</span></p>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                         <button class="text-red-500 hover:text-red-700 font-bold text-sm cancel-appointment-btn" data-doc-id="${docSnap.id}">
+                            Cancel
+                        </button>
+                        <button class="text-secondary hover:text-primary font-bold text-sm open-chat-btn" data-appt-id="${docSnap.id}">
+                            Chat
+                        </button>
+                    </div>
+                </div>
+            `;
+            list.appendChild(item);
+        });
+        
+        // Attach event listeners for dynamic buttons
+        list.querySelectorAll('.cancel-appointment-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const docId = e.target.dataset.docId;
+                await cancelAppointment(docId);
+            });
+        });
+
+        list.querySelectorAll('.open-chat-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const apptId = e.target.dataset.apptId;
+                openChatWithAppointment(apptId);
+            });
+        });
+    });
+}
+
+async function cancelAppointment(docId) {
+    if (!currentUser || !docId) return;
+    try {
+        // Patient can update their own private record only
+        await updateDoc(doc(db, `users/${currentUser.uid}/appointments`, docId), { status: 'Cancelled' });
+        showCustomMessage('Appointment Cancelled', 'Your appointment has been successfully cancelled.');
+    } catch (error) {
+        showCustomMessage('Cancellation Failed', error.message, false);
+    }
+}
+
+function openChatWithAppointment(apptId) {
+    if (!apptId) return;
+    // NEW: Set a global variable for the patient's chat
+    currentChatAppointmentId = apptId;
+    showPage('chat-page');
+    setupChatListener(apptId, 'chat-messages');
+}
+
+// Shared Chat Listener
+function setupChatListener(apptId, containerId) {
+    const q = query(chatRoomMessages(apptId), orderBy('timestamp'));
+    const container = document.getElementById(containerId);
+    
+    // Clear any previous listener to avoid duplicate messages
+    if (window.chatListenerUnsubscribe) {
+        window.chatListenerUnsubscribe();
+    }
+
+    window.chatListenerUnsubscribe = onSnapshot(q, (snap) => {
+        container.innerHTML = '';
+        snap.forEach(s => {
+            const m = s.data();
+            const div = document.createElement('div');
+            const senderUid = m.sender;
+            const messageClass = senderUid === currentUser.uid ? 'bg-secondary text-white self-end' : 'bg-gray-200 self-start';
+            div.className = `p-2 my-1 rounded ${messageClass}`;
+            div.textContent = m.text;
+            container.appendChild(div);
+        });
+        container.scrollTop = container.scrollHeight;
+    });
+}
+
+
+// FIX: Doctor Chat Setup to show all patient chats
+function setupDoctorChat() {
+    // We remove limit(1) to get all active chats
+    const q = query(chatsCollection, orderBy('createdAt', 'desc'));
+    const patientListContainer = document.getElementById('doctor-patient-list');
+    
+    onSnapshot(q, (snap) => {
+        patientListContainer.innerHTML = ''; // Clear the list before repopulating
+        const chatDocs = snap.docs;
+
+        if (chatDocs.length === 0) {
+            patientListContainer.innerHTML = '<p class="text-gray-500 text-center text-sm">No active chats.</p>';
+            // Also clear the chat view if there are no chats
+            document.getElementById('current-patient-name').textContent = 'Patient';
+            document.getElementById('doctor-chat-messages').innerHTML = '<p class="text-gray-500 text-center">Select a patient to start a chat.</p>';
+            document.getElementById('doctor-chat-form').classList.add('hidden');
+            currentChatPatientId = null;
+            return;
+        }
+
+        // Check if the current chat is still in the list
+        let isCurrentChatActive = false;
+        const currentChatDoc = chatDocs.find(doc => doc.id === currentChatPatientId);
+        if (currentChatDoc) {
+            isCurrentChatActive = true;
+        }
+
+        chatDocs.forEach(docSnap => {
+            const chat = docSnap.data();
+            const listItem = document.createElement('div');
+            listItem.className = `chat-list-item p-3 rounded-xl cursor-pointer hover:bg-gray-200 transition-colors ${currentChatPatientId === chat.appointmentId ? 'active' : ''}`;
+            listItem.dataset.apptid = chat.appointmentId;
+            listItem.innerHTML = `
+                <p class="font-semibold text-sm">${chat.patientName || 'Unknown Patient'}</p>
+                <p class="text-xs text-gray-500">Appointment ID: ${chat.appointmentId}</p>
+            `;
+            patientListContainer.appendChild(listItem);
+        });
+
+        // Set up click listeners for each chat item
+        patientListContainer.querySelectorAll('.chat-list-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const apptId = item.dataset.apptid;
+                
+                // Remove 'active' class from all list items
+                patientListContainer.querySelectorAll('.chat-list-item').forEach(i => i.classList.remove('active'));
+                
+                // Add 'active' class to the clicked item
+                item.classList.add('active');
+
+                // Load the selected chat
+                document.getElementById('current-patient-name').textContent = item.querySelector('.font-semibold').textContent;
+                currentChatPatientId = apptId;
+                setupChatListener(currentChatPatientId, 'doctor-chat-messages');
+                document.getElementById('doctor-chat-form').classList.remove('hidden');
+            });
+        });
+
+        // If no chat is currently selected, or the selected one is no longer active, select the first one.
+        if (!currentChatPatientId || !isCurrentChatActive) {
+            const firstChat = chatDocs[0];
+            const firstChatId = firstChat.id;
+            const firstChatName = firstChat.data().patientName;
+            
+            document.getElementById('current-patient-name').textContent = firstChatName || 'Patient';
+            currentChatPatientId = firstChatId;
+            setupChatListener(currentChatPatientId, 'doctor-chat-messages');
+            document.getElementById('doctor-chat-form').classList.remove('hidden');
+
+            // Set the first item as active in the list
+            patientListContainer.querySelector(`[data-apptid="${firstChatId}"]`).classList.add('active');
+        }
+    });
+}
+
+// Doctor send message
+document.getElementById('doctor-chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!currentChatPatientId) return;
+    const text = document.getElementById('doctor-chat-input').value.trim();
+    if (!text) return;
+    await addDoc(chatRoomMessages(currentChatPatientId), { sender: currentUser.uid, text, timestamp: serverTimestamp() });
+    document.getElementById('doctor-chat-input').value = '';
+});
+
+// Patient send message
+document.getElementById('chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    // NEW: Use the global variable for a more reliable chat ID
+    if (!currentChatAppointmentId) return;
+    const text = document.getElementById('chat-input').value.trim();
+    if (!text) return;
+    await addDoc(chatRoomMessages(currentChatAppointmentId), { sender: currentUser.uid, text, timestamp: serverTimestamp() });
+    document.getElementById('chat-input').value = '';
+});
+
+attachShowPageButtons();
+</script>
+
+</body>
+</html>
